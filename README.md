@@ -124,7 +124,7 @@ See [CONTRIBUTING.md](./CONTRIBUTING.md) for the full workflow.
 
 | Person | Module | GitHub |
 |---|---|---|
-| SHNY | Editor | [@fatelvx](https://github.com/fatelvx) |
+| kesrie | Editor | [@fatelvx](https://github.com/fatelvx) |
 | Kaan | Converter | [@kaanreal](https://github.com/kaanreal) |
 
 ---
