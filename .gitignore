@@ -36,8 +36,5 @@ build
 Thumbs.db
 ehthumbs.db
 
-# Rust (local overrides, not project-level)
-.cargo/config.toml
-
-# Husky generated
-.husky/_
+# Rust / Cargo
+src-tauri/target/
