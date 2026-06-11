@@ -1,0 +1,273 @@
+/* Editor layout and chrome. The notefield itself is canvas-drawn. */
+
+.sol-editor {
+  --panel: #16171d;
+  --panel-2: #1d1f27;
+  --line: #2e303a;
+  --ink: #c9cdd6;
+  --ink-dim: #8b909c;
+  --accent: #c084fc;
+
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  background: #0d0e12;
+  color: var(--ink);
+  font: 13px/1.45 system-ui, 'Segoe UI', Roboto, sans-serif;
+  user-select: none;
+}
+
+.editor-main {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/* ===== Toolbar ===== */
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 6px 10px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+}
+
+.toolbar-group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.toolbar-zoom {
+  min-width: 42px;
+  text-align: center;
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.toolbar-title {
+  margin-left: auto;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sol-editor button {
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 10px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.sol-editor button:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.sol-editor button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.sol-editor button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #14060e;
+  font-weight: 600;
+}
+
+.sol-editor select,
+.sol-editor input {
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font: inherit;
+}
+
+/* ===== Notefield ===== */
+
+.notefield {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.notefield canvas {
+  display: block;
+  cursor: crosshair;
+}
+
+/* ===== Timing panel ===== */
+
+.timing-panel {
+  width: 280px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  background: var(--panel);
+  border-left: 1px solid var(--line);
+  padding: 10px;
+}
+
+.timing-panel section {
+  margin-bottom: 18px;
+}
+
+.timing-panel h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.field > span {
+  width: 80px;
+  flex-shrink: 0;
+  color: var(--ink-dim);
+}
+
+.field input,
+.field select {
+  flex: 1;
+  min-width: 0;
+}
+
+.field .file-button {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+}
+
+.event-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.event-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+
+.event-list .jump {
+  background: none;
+  border: none;
+  padding: 2px 0;
+  color: var(--accent);
+  cursor: pointer;
+  min-width: 80px;
+  text-align: left;
+}
+
+.event-list .value {
+  flex: 1;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.event-list .delete {
+  padding: 0 7px;
+  line-height: 18px;
+}
+
+.add-row {
+  display: flex;
+  gap: 6px;
+}
+
+.add-row input {
+  flex: 1;
+  min-width: 0;
+}
+
+.hint {
+  margin: 6px 0 0;
+  color: var(--ink-dim);
+  font-size: 12px;
+}
+
+/* ===== Status bar ===== */
+
+.status-bar {
+  display: flex;
+  gap: 18px;
+  padding: 4px 12px;
+  background: var(--panel);
+  border-top: 1px solid var(--line);
+  color: var(--ink-dim);
+  font-variant-numeric: tabular-nums;
+  min-height: 22px;
+}
+
+.status-spacer {
+  flex: 1;
+}
+
+/* ===== Dialog & toast ===== */
+
+.dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 10;
+}
+
+.dialog {
+  width: 320px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+}
+
+.dialog h2 {
+  margin: 0 0 14px;
+  font-size: 16px;
+  color: var(--ink);
+}
+
+.dialog-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.editor-toast {
+  position: fixed;
+  bottom: 38px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #3a1d23;
+  border: 1px solid #ff6261;
+  color: #ffb3b2;
+  border-radius: 6px;
+  padding: 8px 14px;
+  z-index: 20;
+  max-width: 70vw;
+}
