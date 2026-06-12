@@ -3,6 +3,11 @@
 // Vertical layout like ArrowVortex: row 0 at the top, time flows downward,
 // and the view is anchored so the cursor (or the playhead, while playing)
 // sits on the receptor line. All chart math is in rows; Rust owns the data.
+//
+// The view never jumps: cursor motion eases toward its target row
+// (exponential approach, ~60ms time constant), and the same animated anchor
+// drives both drawing and pointer hit-testing so clicks always land where
+// the eye says they will.
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
@@ -24,6 +29,10 @@ const NOTE_HEIGHT = 14
 const RECEPTOR_FRAC = 0.25
 const OVERSCROLL_ROWS = 8 * ROWS_PER_MEASURE
 const ZOOM_FACTOR = 1.2
+/** Wheel distance that equals one snap step (accumulated for trackpads). */
+const WHEEL_NOTCH = 60
+/** Time constant of the scroll easing, in ms. */
+const SCROLL_TAU = 60
 
 interface Drag {
   col: number
@@ -47,6 +56,8 @@ export default function NoteField() {
   const containerRef = useRef<HTMLDivElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const drawRef = useRef<() => void>(() => {})
+  /** Animated view anchor; trails cursorRow and follows the playhead. */
+  const animRowRef = useRef(0)
   const [size, setSize] = useState({ w: 0, h: 0 })
   const [hover, setHover] = useState<Hover | null>(null)
   const [drag, setDrag] = useState<Drag | null>(null)
@@ -80,20 +91,32 @@ export default function NoteField() {
     const step = snapStep(quant)
     const pxPerRow = pxPerBeat / ROWS_PER_BEAT
     const receptorY = Math.round(H * RECEPTOR_FRAC)
-    const anchorRowF = playing ? timeToRowF(events, audioEngine.timeMs()) : cursorRow
+    const anchorRowF = playing
+      ? timeToRowF(events, audioEngine.timeMs())
+      : animRowRef.current
+    // Keep the animated anchor in sync during playback so that stopping
+    // (which sets the cursor to the playhead row) never causes a swoop.
+    if (playing) animRowRef.current = anchorRowF
     const fieldW = chart.keys * COL_WIDTH
     const x0 = Math.round((W - fieldW) / 2)
     const rowAtY = (y: number) => anchorRowF + (y - receptorY) / pxPerRow
     const yAtRow = (row: number) => receptorY + (row - anchorRowF) * pxPerRow
 
-    // Notefield background.
+    // Notefield background with softly shaded edges.
     ctx.fillStyle = 'rgba(255, 255, 255, 0.03)'
+    ctx.fillRect(x0, 0, fieldW, H)
+    const edge = ctx.createLinearGradient(x0, 0, x0 + fieldW, 0)
+    edge.addColorStop(0, 'rgba(0, 0, 0, 0.35)')
+    edge.addColorStop(0.06, 'rgba(0, 0, 0, 0)')
+    edge.addColorStop(0.94, 'rgba(0, 0, 0, 0)')
+    edge.addColorStop(1, 'rgba(0, 0, 0, 0.35)')
+    ctx.fillStyle = edge
     ctx.fillRect(x0, 0, fieldW, H)
 
     // Waveform: min/max amplitude of the audio span covered by each pixel
     // line, drawn sideways behind the notefield (ArrowVortex style).
     if (audioEngine.peaks) {
-      ctx.fillStyle = 'rgba(82, 139, 255, 0.32)'
+      ctx.fillStyle = 'rgba(82, 139, 255, 0.30)'
       const cx = x0 + fieldW / 2
       const halfW = fieldW / 2 - 2
       let tPrev = rowToTime(events, rowAtY(0))
@@ -130,7 +153,7 @@ export default function NoteField() {
       if (row % ROWS_PER_MEASURE === 0) {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.30)'
         ctx.fillStyle = 'rgba(255, 255, 255, 0.45)'
-        ctx.fillText(String(row / ROWS_PER_MEASURE), x0 - 8, y + 4)
+        ctx.fillText(String(row / ROWS_PER_MEASURE), x0 - 10, y + 4)
       } else if (row % ROWS_PER_BEAT === 0) {
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)'
       } else {
@@ -162,10 +185,16 @@ export default function NoteField() {
       ctx.fillText(`STOP ${s.duration_ms}ms`, x0 + fieldW + 9, y + 16)
     }
 
-    // Notes, colored by their row's quantization.
+    // Notes, colored by their row's quantization, lit from the top.
     const noteW = COL_WIDTH - 12
     const bodyW = COL_WIDTH - 26
-    const drawNote = (row: number, endRow: number, col: number, alpha: number) => {
+    const drawNote = (
+      row: number,
+      endRow: number,
+      col: number,
+      alpha: number,
+      ghost = false,
+    ) => {
       const x = x0 + col * COL_WIDTH + (COL_WIDTH - noteW) / 2
       const yHead = yAtRow(row)
       const color = rowColor(row)
@@ -173,19 +202,38 @@ export default function NoteField() {
       if (endRow > row) {
         const yEnd = yAtRow(endRow)
         const bx = x0 + col * COL_WIDTH + (COL_WIDTH - bodyW) / 2
-        ctx.globalAlpha = alpha * 0.45
+        ctx.globalAlpha = alpha * 0.4
         ctx.fillStyle = color
-        ctx.fillRect(bx, yHead, bodyW, yEnd - yHead)
-        ctx.globalAlpha = alpha * 0.8
-        ctx.fillRect(bx, yEnd - 3, bodyW, 4)
+        ctx.beginPath()
+        ctx.roundRect(bx, yHead, bodyW, Math.max(yEnd - yHead, 2), 3)
+        ctx.fill()
+        ctx.globalAlpha = alpha * 0.85
+        ctx.beginPath()
+        ctx.roundRect(bx, yEnd - 3, bodyW, 5, 2)
+        ctx.fill()
         ctx.globalAlpha = alpha
       }
+      const top = yHead - NOTE_HEIGHT / 2
       ctx.fillStyle = color
       ctx.beginPath()
-      ctx.roundRect(x, yHead - NOTE_HEIGHT / 2, noteW, NOTE_HEIGHT, 3)
+      ctx.roundRect(x, top, noteW, NOTE_HEIGHT, 3)
       ctx.fill()
-      ctx.strokeStyle = 'rgba(0, 0, 0, 0.6)'
+      if (!ghost) {
+        const sheen = ctx.createLinearGradient(0, top, 0, top + NOTE_HEIGHT)
+        sheen.addColorStop(0, 'rgba(255, 255, 255, 0.32)')
+        sheen.addColorStop(0.45, 'rgba(255, 255, 255, 0.05)')
+        sheen.addColorStop(1, 'rgba(0, 0, 0, 0.22)')
+        ctx.fillStyle = sheen
+        ctx.beginPath()
+        ctx.roundRect(x, top, noteW, NOTE_HEIGHT, 3)
+        ctx.fill()
+      }
+      ctx.strokeStyle = 'rgba(0, 0, 0, 0.55)'
+      if (ghost) ctx.setLineDash([4, 3])
+      ctx.beginPath()
+      ctx.roundRect(x, top, noteW, NOTE_HEIGHT, 3)
       ctx.stroke()
+      ctx.setLineDash([])
       ctx.globalAlpha = 1
     }
 
@@ -200,28 +248,38 @@ export default function NoteField() {
     if (!playing && drag) {
       const a = Math.min(drag.startRow, drag.currentRow)
       const b = Math.max(drag.startRow, drag.currentRow)
-      drawNote(a, b, drag.col, 0.4)
+      drawNote(a, b, drag.col, 0.45, true)
     } else if (!playing && hover && hover.col >= 0) {
-      drawNote(snapRowClosest(hover.rowF, quant), snapRowClosest(hover.rowF, quant), hover.col, 0.25)
+      const r = snapRowClosest(hover.rowF, quant)
+      drawNote(r, r, hover.col, 0.28, true)
     }
 
-    // Receptor line at the cursor (or the playhead while playing).
+    // Receptor line at the cursor (or the playhead while playing), with a
+    // soft glow so the eye always finds it.
+    const accent = playing ? '#63dc63' : '#c084fc'
     const cy = Math.round(playing ? receptorY : yAtRow(cursorRow)) + 0.5
-    ctx.strokeStyle = playing ? '#63dc63' : '#c084fc'
+    ctx.save()
+    ctx.shadowColor = accent
+    ctx.shadowBlur = 10
+    ctx.strokeStyle = accent
+    ctx.lineWidth = 1.5
     ctx.beginPath()
     ctx.moveTo(x0 - 4, cy)
     ctx.lineTo(x0 + fieldW + 4, cy)
     ctx.stroke()
+    ctx.restore()
+    ctx.strokeStyle = playing ? 'rgba(99, 220, 99, 0.55)' : 'rgba(192, 132, 252, 0.55)'
+    ctx.lineWidth = 1.5
     for (let c = 0; c < chart.keys; c++) {
       const x = x0 + c * COL_WIDTH + (COL_WIDTH - noteW) / 2
-      ctx.strokeStyle = playing ? 'rgba(99, 220, 99, 0.5)' : 'rgba(192, 132, 252, 0.5)'
       ctx.beginPath()
       ctx.roundRect(x - 2, cy - NOTE_HEIGHT / 2 - 3, noteW + 4, NOTE_HEIGHT + 6, 4)
       ctx.stroke()
     }
+    ctx.lineWidth = 1
   }, [chart, snapIndex, pxPerBeat, cursorRow, playing, size, hover, drag, audioGeneration])
 
-  // Redraw on every state change; keep the latest draw for the rAF loop.
+  // Redraw on every state change; keep the latest draw for the rAF loops.
   useEffect(() => {
     drawRef.current = draw
     draw()
@@ -236,6 +294,28 @@ export default function NoteField() {
     })
     return () => cancelAnimationFrame(raf)
   }, [playing])
+
+  // Cursor easing: animate the anchor toward the cursor row.
+  useEffect(() => {
+    if (playing) return
+    let raf = 0
+    let last = performance.now()
+    const tick = (now: number) => {
+      const dt = Math.min(64, now - last)
+      last = now
+      const d = cursorRow - animRowRef.current
+      if (Math.abs(d) * (pxPerBeat / ROWS_PER_BEAT) < 0.4) {
+        animRowRef.current = cursorRow
+        drawRef.current()
+        return
+      }
+      animRowRef.current += d * (1 - Math.exp(-dt / SCROLL_TAU))
+      drawRef.current()
+      raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [cursorRow, playing, pxPerBeat])
 
   // Canvas sizing (device-pixel aware).
   useEffect(() => {
@@ -252,7 +332,7 @@ export default function NoteField() {
   // ==============================================================================================
   // Interactions.
 
-  /** Pointer position -> field coordinates, reading live store state. */
+  /** Pointer position -> field coordinates, using the animated anchor. */
   const locate = (e: { clientX: number; clientY: number }) => {
     const canvas = canvasRef.current
     const s = useEditorStore.getState()
@@ -264,7 +344,7 @@ export default function NoteField() {
     const receptorY = Math.round(rect.height * RECEPTOR_FRAC)
     const anchorRowF = s.playing
       ? timeToRowF(s.chart.events, audioEngine.timeMs())
-      : s.cursorRow
+      : animRowRef.current
     const fieldW = s.chart.keys * COL_WIDTH
     const x0 = Math.round((rect.width - fieldW) / 2)
     const col = x >= x0 && x < x0 + fieldW ? Math.floor((x - x0) / COL_WIDTH) : -1
@@ -315,21 +395,37 @@ export default function NoteField() {
   }
 
   // Wheel must be a native non-passive listener so preventDefault works.
+  // Deltas accumulate so trackpads (many small events) and mice (one big
+  // notch) both scroll exactly one snap step per WHEEL_NOTCH of travel.
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
+    let accum = 0
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
       const s = useEditorStore.getState()
       if (!s.chart) return
-      const dir = e.deltaY > 0 ? 1 : -1
       if (e.ctrlKey) {
+        const dir = e.deltaY > 0 ? 1 : -1
         s.setPxPerBeat(s.pxPerBeat * (dir > 0 ? 1 / ZOOM_FACTOR : ZOOM_FACTOR))
         return
       }
       if (s.playing) return
+      let notches: number
+      if (Math.abs(e.deltaY) >= WHEEL_NOTCH) {
+        // Discrete wheel: one step per notch (~100px), N for coalesced spins.
+        notches = Math.round(e.deltaY / 100) || Math.sign(e.deltaY)
+        accum = 0
+      } else {
+        // Trackpad: accumulate small pixel deltas into steps.
+        if (Math.sign(e.deltaY) !== Math.sign(accum)) accum = 0
+        accum += e.deltaY
+        notches = Math.trunc(accum / WHEEL_NOTCH)
+        accum -= notches * WHEEL_NOTCH
+      }
+      if (notches === 0) return
       const quant = SNAP_QUANTS[s.snapIndex]
-      const next = snapRowClosest(s.cursorRow, quant) + dir * snapStep(quant)
+      const next = snapRowClosest(s.cursorRow, quant) + notches * snapStep(quant)
       const maxRow = s.chart.end_row + OVERSCROLL_ROWS
       s.setCursorRow(Math.min(Math.max(next, 0), maxRow))
     }

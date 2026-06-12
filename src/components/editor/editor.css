@@ -63,10 +63,24 @@
   padding: 4px 10px;
   font: inherit;
   cursor: pointer;
+  transition:
+    border-color 0.12s ease,
+    background 0.12s ease,
+    color 0.12s ease;
 }
 
 .sol-editor button:hover:not(:disabled) {
   border-color: var(--accent);
+  color: #fff;
+}
+
+.sol-editor button:active:not(:disabled) {
+  background: #14151b;
+}
+
+.sol-editor :is(button, select, input):focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .sol-editor button:disabled {
@@ -79,6 +93,21 @@
   border-color: var(--accent);
   color: #14060e;
   font-weight: 600;
+}
+
+.sol-editor button.primary:hover:not(:disabled) {
+  background: #cf9dff;
+  color: #14060e;
+}
+
+.sol-editor button.danger {
+  border-color: #5c2a30;
+  color: #ffb3b2;
+}
+
+.sol-editor button.danger:hover:not(:disabled) {
+  border-color: #ff6261;
+  color: #ffd1d0;
 }
 
 .sol-editor select,
@@ -114,6 +143,8 @@
   background: var(--panel);
   border-left: 1px solid var(--line);
   padding: 10px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
 
 .timing-panel section {
@@ -244,6 +275,24 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   padding: 18px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+  animation: dialog-in 0.14s ease-out;
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.dialog-text {
+  margin: 0 0 4px;
+  color: var(--ink-dim);
 }
 
 .dialog h2 {
