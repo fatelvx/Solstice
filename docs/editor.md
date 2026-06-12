@@ -43,3 +43,18 @@ and stops stay aligned with the grid.
 BPM changes and stops are edited in the sidebar and apply at the cursor row.
 Note colors follow the ITG/ArrowVortex row-type palette (4th red, 8th blue,
 12th purple, 16th yellow, …).
+
+## Behaviour notes
+
+- The view anchor eases toward the cursor instead of jumping; pointer
+  hit-testing uses the same animated anchor, so clicks land where the screen
+  shows. Wheel deltas accumulate, so trackpads and discrete mice both move
+  one snap step per notch of travel.
+- New / Open / closing the window with unsaved changes asks Save / Discard /
+  Cancel first (window close goes through Tauri's `onCloseRequested`).
+- Audio references in `.sol` are relative to the chart file. Picking audio
+  before the first save stores an absolute path; saving re-anchors it, and
+  save-as into another folder resolves the old relative path so the chart
+  stays playable (`portable_audio` in `editor/commands.rs`).
+- Replacing the audio file while playing stops playback cleanly; edits that
+  arrive while audio is still decoding never trigger a second decode.

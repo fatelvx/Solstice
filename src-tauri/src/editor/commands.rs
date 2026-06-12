@@ -199,7 +199,11 @@ pub fn editor_save_sol(
     // Keep the chart portable: now that we know where it lives, audio picked
     // before the first save (stored absolute) becomes relative, and a
     // save-as into another folder re-anchors a previously relative path.
-    let old_dir = s.path.as_ref().and_then(|p| p.parent()).map(Path::to_path_buf);
+    let old_dir = s
+        .path
+        .as_ref()
+        .and_then(|p| p.parent())
+        .map(Path::to_path_buf);
     if let (Some(new_dir), Some(chart)) = (target.parent(), s.chart.as_mut()) {
         if !chart.files.audio.trim().is_empty() {
             chart.files.audio = portable_audio(&chart.files.audio, old_dir.as_deref(), new_dir);
