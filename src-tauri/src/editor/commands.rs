@@ -4,7 +4,7 @@
 //! receives a [`ChartPayload`] after every mutation and only does
 //! presentation-side pixel math with it.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use serde::Serialize;
@@ -128,6 +128,29 @@ fn resolve_audio(chart: &EditorChart, sol_path: Option<&std::path::Path>) -> Opt
     Some(dir.join(p).to_string_lossy().into_owned())
 }
 
+/// Rewrites an audio reference for a chart that lives (or is being saved)
+/// in `new_dir`. `.sol` charts are portable, so paths inside the chart
+/// folder are stored relative with forward slashes; anything else keeps an
+/// absolute path so it at least stays playable. Relative inputs are resolved
+/// against `old_dir` first (the chart's previous location, for save-as).
+fn portable_audio(audio: &str, old_dir: Option<&Path>, new_dir: &Path) -> String {
+    let audio = audio.trim();
+    let p = Path::new(audio);
+    let abs = if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        match old_dir {
+            Some(dir) => dir.join(p),
+            // Relative with no previous location: nothing to resolve against.
+            None => return audio.to_string(),
+        }
+    };
+    match abs.strip_prefix(new_dir) {
+        Ok(rel) => rel.to_string_lossy().replace('\\', "/"),
+        Err(_) => abs.to_string_lossy().into_owned(),
+    }
+}
+
 // ================================================================================================
 // Chart lifecycle.
 
@@ -172,6 +195,17 @@ pub fn editor_save_sol(
         .map(PathBuf::from)
         .or_else(|| s.path.clone())
         .ok_or("no save path: pass one or save-as first")?;
+
+    // Keep the chart portable: now that we know where it lives, audio picked
+    // before the first save (stored absolute) becomes relative, and a
+    // save-as into another folder re-anchors a previously relative path.
+    let old_dir = s.path.as_ref().and_then(|p| p.parent()).map(Path::to_path_buf);
+    if let (Some(new_dir), Some(chart)) = (target.parent(), s.chart.as_mut()) {
+        if !chart.files.audio.trim().is_empty() {
+            chart.files.audio = portable_audio(&chart.files.audio, old_dir.as_deref(), new_dir);
+        }
+    }
+
     let chart = s.chart.as_ref().ok_or("no chart open")?;
     let yaml = sol::write(&chart.to_sol()).map_err(|e| e.to_string())?;
     std::fs::write(&target, yaml).map_err(|e| format!("write {}: {e}", target.display()))?;
@@ -306,12 +340,10 @@ pub fn editor_set_audio(
 ) -> Result<ChartPayload, String> {
     let mut s = state.lock().map_err(|e| e.to_string())?;
     // Store relative to the .sol file when possible so the chart folder is
-    // portable; fall back to the absolute path.
+    // portable; an unsaved chart keeps the absolute path until the first
+    // save re-anchors it (see editor_save_sol).
     let audio = match s.path.as_ref().and_then(|p| p.parent()) {
-        Some(dir) => std::path::Path::new(&path)
-            .strip_prefix(dir)
-            .map(|rel| rel.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_else(|_| path.clone()),
+        Some(dir) => portable_audio(&path, None, dir),
         None => path.clone(),
     };
     let chart = s.chart.as_mut().ok_or("no chart open")?;
@@ -353,4 +385,69 @@ pub async fn editor_pick_file(
         other => return Err(format!("unknown dialog kind {other}")),
     };
     Ok(picked)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::portable_audio;
+    use std::path::{Path, PathBuf};
+
+    fn root(name: &str) -> PathBuf {
+        if cfg!(windows) {
+            PathBuf::from(format!(r"C:\{name}"))
+        } else {
+            PathBuf::from(format!("/{name}"))
+        }
+    }
+
+    #[test]
+    fn absolute_inside_folder_becomes_relative() {
+        let dir = root("songs").join("mymap");
+        let audio = dir.join("audio.mp3");
+        assert_eq!(
+            portable_audio(&audio.to_string_lossy(), None, &dir),
+            "audio.mp3"
+        );
+    }
+
+    #[test]
+    fn nested_paths_use_forward_slashes() {
+        let dir = root("songs");
+        let audio = dir.join("sub").join("audio.ogg");
+        assert_eq!(
+            portable_audio(&audio.to_string_lossy(), None, &dir),
+            "sub/audio.ogg"
+        );
+    }
+
+    #[test]
+    fn outside_folder_stays_absolute() {
+        let dir = root("songs");
+        let audio = root("elsewhere").join("audio.mp3");
+        assert_eq!(
+            portable_audio(&audio.to_string_lossy(), None, &dir),
+            audio.to_string_lossy()
+        );
+    }
+
+    #[test]
+    fn save_as_reanchors_relative_path() {
+        // Chart moves from /songs/a to /songs/a/exports: the audio that was
+        // "audio.mp3" must resolve against the old folder and stay playable.
+        let old = root("songs").join("a");
+        let new = old.join("exports");
+        let rewritten = portable_audio("audio.mp3", Some(&old), &new);
+        assert_eq!(rewritten, old.join("audio.mp3").to_string_lossy());
+
+        // Moving within the same folder keeps it relative.
+        assert_eq!(portable_audio("audio.mp3", Some(&old), &old), "audio.mp3");
+    }
+
+    #[test]
+    fn relative_without_old_location_is_untouched() {
+        assert_eq!(
+            portable_audio("audio.mp3", None, Path::new("anywhere")),
+            "audio.mp3"
+        );
+    }
 }
