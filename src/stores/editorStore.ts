@@ -9,6 +9,9 @@ import type { ChartPayload } from '../types/editor'
 import { audioEngine } from '../lib/audio'
 import { rowToTime, snapRowClosest, SNAP_QUANTS, timeToRowF } from '../lib/timing'
 
+/** A destructive action waiting on the unsaved-changes dialog. */
+export type PendingAction = 'new' | 'open' | 'close'
+
 interface EditorStore {
   chart: ChartPayload | null
   error: string | null
@@ -20,6 +23,7 @@ interface EditorStore {
   /** Bumped when waveform data finishes loading so the canvas redraws. */
   audioGeneration: number
   showNewDialog: boolean
+  pendingAction: PendingAction | null
 
   setError(error: string | null): void
   setSnapIndex(i: number): void
@@ -27,6 +31,13 @@ interface EditorStore {
   setPxPerBeat(v: number): void
   setCursorRow(row: number): void
   setShowNewDialog(show: boolean): void
+
+  /** New/Open/close go through these so unsaved changes can intercept. */
+  requestNew(): void
+  requestOpen(): void
+  requestClose(): void
+  confirmPending(save: boolean): Promise<void>
+  cancelPending(): void
 
   /** Re-fetches the open chart from Rust (page reload / dev HMR). */
   restore(): Promise<void>
@@ -55,11 +66,15 @@ export const useEditorStore = create<EditorStore>()((set, get) => {
     set({ chart })
     const path = chart.audio_path
     if (path && path !== audioEngine.loadedPath) {
+      // Replacing the audio mid-playback stops cleanly at the current time
+      // (the engine would otherwise cut the sound with `playing` stuck on).
+      if (get().playing) get().stopPlayback()
       audioEngine
         .load(path)
         .then(() => set((s) => ({ audioGeneration: s.audioGeneration + 1 })))
         .catch(fail)
     } else if (!path && audioEngine.loadedPath) {
+      if (get().playing) get().stopPlayback()
       audioEngine.unload()
       set((s) => ({ audioGeneration: s.audioGeneration + 1 }))
     }
@@ -85,6 +100,7 @@ export const useEditorStore = create<EditorStore>()((set, get) => {
     playing: false,
     audioGeneration: 0,
     showNewDialog: false,
+    pendingAction: null,
 
     setError: (error) => set({ error }),
     setSnapIndex: (i) =>
@@ -96,6 +112,43 @@ export const useEditorStore = create<EditorStore>()((set, get) => {
     setPxPerBeat: (v) => set({ pxPerBeat: Math.min(Math.max(v, 16), 384) }),
     setCursorRow: (row) => set({ cursorRow: Math.max(0, Math.round(row)) }),
     setShowNewDialog: (showNewDialog) => set({ showNewDialog }),
+
+    requestNew: () => {
+      if (get().chart?.dirty) set({ pendingAction: 'new' })
+      else set({ showNewDialog: true })
+    },
+
+    requestOpen: () => {
+      if (get().chart?.dirty) set({ pendingAction: 'open' })
+      else void get().openSol()
+    },
+
+    requestClose: () => {
+      get().stopPlayback()
+      set({ pendingAction: 'close' })
+    },
+
+    cancelPending: () => set({ pendingAction: null }),
+
+    confirmPending: async (save) => {
+      const action = get().pendingAction
+      set({ pendingAction: null })
+      if (!action) return
+      if (save) {
+        await get().saveSol(false)
+        // Save-as cancelled or failed: stay on the chart instead of
+        // discarding the changes the user just asked to keep.
+        if (get().chart?.dirty) return
+      }
+      if (action === 'new') {
+        set({ showNewDialog: true })
+      } else if (action === 'open') {
+        await get().openSol()
+      } else {
+        const { getCurrentWindow } = await import('@tauri-apps/api/window')
+        await getCurrentWindow().destroy()
+      }
+    },
 
     restore: async () => {
       try {

@@ -8,8 +8,8 @@ export default function Toolbar() {
   const playing = useEditorStore((s) => s.playing)
   const setSnapIndex = useEditorStore((s) => s.setSnapIndex)
   const setPxPerBeat = useEditorStore((s) => s.setPxPerBeat)
-  const setShowNewDialog = useEditorStore((s) => s.setShowNewDialog)
-  const openSol = useEditorStore((s) => s.openSol)
+  const requestNew = useEditorStore((s) => s.requestNew)
+  const requestOpen = useEditorStore((s) => s.requestOpen)
   const saveSol = useEditorStore((s) => s.saveSol)
   const undo = useEditorStore((s) => s.undo)
   const redo = useEditorStore((s) => s.redo)
@@ -23,8 +23,8 @@ export default function Toolbar() {
   return (
     <div className="toolbar">
       <div className="toolbar-group">
-        <button onClick={() => setShowNewDialog(true)}>New</button>
-        <button onClick={() => void openSol()}>Open</button>
+        <button onClick={requestNew}>New</button>
+        <button onClick={requestOpen}>Open</button>
         <button disabled={!chart} onClick={() => void saveSol(false)}>
           Save
         </button>

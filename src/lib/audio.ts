@@ -60,6 +60,8 @@ export class AudioEngine {
   sampleRate = 44100
   /** Path of the currently loaded file ('' when nothing is loaded). */
   loadedPath = ''
+  /** Path being decoded right now ('' when idle); dedupes concurrent loads. */
+  private loadingPath = ''
   /** Called when playback reaches the end of the audio file. */
   onEnded: (() => void) | null = null
 
@@ -76,16 +78,25 @@ export class AudioEngine {
   }
 
   async load(path: string): Promise<void> {
-    if (path === this.loadedPath) return
-    this.stop()
-    this.ctx ??= new AudioContext()
-    const bytes = await invoke<ArrayBuffer>('editor_read_audio', { path })
-    const buffer = await this.ctx.decodeAudioData(bytes)
-    this.buffer = buffer
-    this.sampleRate = buffer.sampleRate
-    this.mono = mixToMono(buffer)
-    this.peaks = computePeaks(this.mono)
-    this.loadedPath = path
+    // Already loaded, or the same file is decoding right now: edit commands
+    // that arrive while a load is in flight must not re-read and re-decode.
+    if (path === this.loadedPath || path === this.loadingPath) return
+    this.loadingPath = path
+    try {
+      this.ctx ??= new AudioContext()
+      const bytes = await invoke<ArrayBuffer>('editor_read_audio', { path })
+      const buffer = await this.ctx.decodeAudioData(bytes)
+      // A newer load superseded this one while we were decoding.
+      if (this.loadingPath !== path) return
+      this.stop()
+      this.buffer = buffer
+      this.sampleRate = buffer.sampleRate
+      this.mono = mixToMono(buffer)
+      this.peaks = computePeaks(this.mono)
+      this.loadedPath = path
+    } finally {
+      if (this.loadingPath === path) this.loadingPath = ''
+    }
   }
 
   unload(): void {

@@ -4,7 +4,7 @@ import { useEditorStore } from '../../stores/editorStore'
 
 export default function NewChartDialog(props: { allowCancel: boolean }) {
   const newChart = useEditorStore((s) => s.newChart)
-  const openSol = useEditorStore((s) => s.openSol)
+  const requestOpen = useEditorStore((s) => s.requestOpen)
   const setShowNewDialog = useEditorStore((s) => s.setShowNewDialog)
 
   const [keys, setKeys] = useState(4)
@@ -56,7 +56,7 @@ export default function NewChartDialog(props: { allowCancel: boolean }) {
           <button className="primary" onClick={create}>
             Create
           </button>
-          <button onClick={() => void openSol()}>Open .sol…</button>
+          <button onClick={requestOpen}>Open .sol…</button>
           {props.allowCancel && (
             <button onClick={() => setShowNewDialog(false)}>Cancel</button>
           )}

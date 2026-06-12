@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 
 import { useEditorStore } from '../../stores/editorStore'
 import { ROWS_PER_MEASURE, SNAP_QUANTS, snapRowClosest, snapStep } from '../../lib/timing'
@@ -7,11 +8,13 @@ import NoteField from './NoteField'
 import TimingPanel from './TimingPanel'
 import StatusBar from './StatusBar'
 import NewChartDialog from './NewChartDialog'
+import UnsavedDialog from './UnsavedDialog'
 import './editor.css'
 
 export default function Editor() {
   const chart = useEditorStore((s) => s.chart)
   const showNewDialog = useEditorStore((s) => s.showNewDialog)
+  const pendingAction = useEditorStore((s) => s.pendingAction)
   const error = useEditorStore((s) => s.error)
   const restore = useEditorStore((s) => s.restore)
 
@@ -19,6 +22,28 @@ export default function Editor() {
   useEffect(() => {
     void restore()
   }, [restore])
+
+  // Closing the window with unsaved changes asks first.
+  useEffect(() => {
+    let unlisten: (() => void) | undefined
+    let cancelled = false
+    void getCurrentWindow()
+      .onCloseRequested((event) => {
+        const s = useEditorStore.getState()
+        if (s.chart?.dirty) {
+          event.preventDefault()
+          s.requestClose()
+        }
+      })
+      .then((u) => {
+        if (cancelled) u()
+        else unlisten = u
+      })
+    return () => {
+      cancelled = true
+      unlisten?.()
+    }
+  }, [])
 
   useEffect(() => {
     if (!error) return
@@ -33,7 +58,15 @@ export default function Editor() {
       if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
 
       const s = useEditorStore.getState()
-      if (!s.chart) return
+
+      if (e.key === 'Escape') {
+        if (s.pendingAction) s.cancelPending()
+        else if (s.showNewDialog && s.chart) s.setShowNewDialog(false)
+        return
+      }
+      // A modal owns the keyboard; chart shortcuts must not fire behind it.
+      if (s.pendingAction || s.showNewDialog || !s.chart) return
+
       const quant = SNAP_QUANTS[s.snapIndex]
       const step = snapStep(quant)
       const maxRow = s.chart.end_row + 8 * ROWS_PER_MEASURE
@@ -118,6 +151,7 @@ export default function Editor() {
       </div>
       <StatusBar />
       {(!chart || showNewDialog) && <NewChartDialog allowCancel={chart !== null} />}
+      {pendingAction && <UnsavedDialog />}
       {error && <div className="editor-toast">{error}</div>}
     </div>
   )
